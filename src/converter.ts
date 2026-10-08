@@ -1,11 +1,12 @@
 import type { PandocRunner } from "./pandoc";
 import { matchCitationPattern } from "./citation-pattern";
+import { excludeSections, normalizeExcludedHeadings, parseCallout, wrapCallout, figureBlocks, type ImageResolver } from "./structures";
 import { validateSettings, type OutputFormat, type PluginSettings } from "./settings";
 
 export interface AstNode { t: string; c?: any }
 export interface PandocDocument { "pandoc-api-version": number[]; meta: Record<string, unknown>; blocks: AstNode[] }
-export interface ConversionResult { body: string; citations: string[]; removedLinks: string[]; warnings: string[] }
-interface Report { citations: Set<string>; removedLinks: Set<string>; warnings: string[]; patternMatches: Set<string> }
+export interface ConversionResult { body: string; citations: string[]; removedLinks: string[]; warnings: string[]; images: string[]; excludedSections: string[] }
+interface Report { citations: Set<string>; removedLinks: Set<string>; warnings: string[]; patternMatches: Set<string>; images: Set<string>; excludedSections: string[]; imageResolver?: ImageResolver }
 
 function plainText(nodes: AstNode[]): string {
   return nodes.map(node => {
@@ -34,12 +35,8 @@ function walk(value: unknown, visit: (node: AstNode) => void): void {
 function assertSupported(doc: PandocDocument): void {
   const issues = new Set<string>();
   walk(doc.blocks, node => {
-    if (node.t === "Image") issues.add(`Image: ${node.c[2][0]}`);
-    if (node.t === "BlockQuote") {
-      const first = node.c[0];
-      if (first && ["Para", "Plain"].includes(first.t) && /^\[![^\]]+\]/.test(plainText(first.c))) {
-        issues.add(`Callout: ${plainText(first.c).split("\n")[0]}`);
-      }
+    if (node.t === "Image" && node.c[2][1] === "wikilink" && !/\.(png|jpe?g|pdf|svg)$/i.test(node.c[2][0])) {
+      issues.add(`Note embed is not supported: ${node.c[2][0]}`);
     }
     if (node.t === "Para" || node.t === "Plain") {
       for (let i = 0; i < node.c.length; i++) {
@@ -92,6 +89,8 @@ function transformInlines(nodes: AstNode[], format: OutputFormat, settings: Plug
       output.push({ ...node, c: transformInlines(node.c, format, settings, report) });
     } else if (["Link", "Span", "Quoted"].includes(node.t)) {
       output.push({ ...node, c: [node.c[0], transformInlines(node.c[1], format, settings, report), ...node.c.slice(2)] });
+    } else if (node.t === "Image") {
+      throw new Error("Inline images cannot become figures. Put each image on its own line.");
     } else if (node.t === "Note") {
       output.push({ ...node, c: transformBlocks(node.c, format, settings, report, false) });
     } else output.push(node);
@@ -103,7 +102,12 @@ function transformInlines(nodes: AstNode[], format: OutputFormat, settings: Plug
 }
 
 function flattenChildren(blocks: AstNode[], format: OutputFormat, settings: PluginSettings, report: Report): AstNode[] {
-  const lines: AstNode[][] = [];
+  let lines: AstNode[][] = [];
+  const result: AstNode[] = [];
+  const flush = (): void => {
+    if (lines.length) result.push({ t: "Para", c: lines.flatMap((line, index) => index ? [{ t: "SoftBreak" }, ...line] : line) });
+    lines = [];
+  };
   const collect = (items: AstNode[]): void => {
     for (const block of items) {
       if (block.t === "Plain" || block.t === "Para") {
@@ -112,20 +116,24 @@ function flattenChildren(blocks: AstNode[], format: OutputFormat, settings: Plug
       } else if (block.t === "BulletList" || block.t === "OrderedList") {
         const children: AstNode[][] = block.t === "BulletList" ? block.c : block.c[1];
         children.forEach(collect);
+      } else if (block.t === "Figure" || parseCallout(block)) {
+        flush();
+        result.push(...transformBlocks([block], format, settings, report, false));
       } else {
         throw new Error(`Cannot flatten ${block.t} inside an outline paragraph. Move this block outside the outline.`);
       }
     }
   };
   collect(blocks);
-  return lines.flatMap((line, index) => index ? [{ t: "SoftBreak" }, ...line] : line);
+  flush();
+  return result;
 }
 
 function transformBlocks(blocks: AstNode[], format: OutputFormat, settings: PluginSettings, report: Report, outline: boolean): AstNode[] {
   return blocks.flatMap(block => {
     if (block.t === "BulletList" && outline) {
       return (block.c as AstNode[][]).flatMap(item => {
-        const firstChild = item.findIndex(child => child.t === "BulletList" || child.t === "OrderedList");
+        const firstChild = item.findIndex(child => child.t === "BulletList" || child.t === "OrderedList" || child.t === "Figure" || parseCallout(child));
         const labelBlocks = firstChild === -1 ? item : item.slice(0, firstChild);
         if (labelBlocks.some(label => !["Plain", "Para"].includes(label.t))) {
           throw new Error("Outline labels must contain text. Move structured blocks outside the outline.");
@@ -134,10 +142,34 @@ function transformBlocks(blocks: AstNode[], format: OutputFormat, settings: Plug
         const prefix = format === "latex" ? "%" : "//";
         const result: AstNode[] = [{ t: "RawBlock", c: [format, `${prefix} ${label}`] }];
         const body = firstChild === -1 ? [] : flattenChildren(item.slice(firstChild), format, settings, report);
-        if (body.length) result.push({ t: "Para", c: body });
+        if (body.length) result.push(...body);
         else report.warnings.push(`Label has no body text: ${label}`);
         return result;
       });
+    }
+    const callout = parseCallout(block);
+    if (callout) {
+      if (format === "latex" && settings.latexCalloutStyle === "theorem" && callout.kind !== "box") {
+        const message = `Callout uses the ${callout.kind} environment. Define it in your LaTeX preamble; the starter template includes it.`;
+        if (!report.warnings.includes(message)) report.warnings.push(message);
+      }
+      return wrapCallout(callout.title, callout.kind, transformBlocks(callout.body, format, settings, report, false), format, settings);
+    }
+    if (block.t === "Figure") {
+      const images: AstNode[] = [];
+      walk(block.c[2], node => { if (node.t === "Image") images.push(node); });
+      if (images.length !== 1) throw new Error("Each figure must contain exactly one image.");
+      const image = images[0];
+      const captionBlocks: AstNode[] = block.c[1][1];
+      let caption = captionBlocks.flatMap((part, i) => {
+        if (!["Plain", "Para"].includes(part.t)) throw new Error("Figure captions must contain inline text.");
+        return [...(i ? [{ t: "Space" }] : []), ...part.c];
+      });
+      // Obsidian's numeric alias means display size, not a caption.
+      if (image.c[2][1] === "wikilink" && (/^\d+(?:x\d+)?$/.test(plainText(caption)) || plainText(caption) === image.c[2][0])) caption = [];
+      const figure = figureBlocks(image, transformInlines(caption, format, settings, report), format, report.imageResolver);
+      report.images.add(figure.path);
+      return figure.blocks;
     }
     if (block.t === "Plain" || block.t === "Para") {
       const inlines = transformInlines(block.c, format, settings, report);
@@ -152,8 +184,10 @@ function transformBlocks(blocks: AstNode[], format: OutputFormat, settings: Plug
   });
 }
 
-export async function transformDocument(doc: PandocDocument, format: OutputFormat, settings: PluginSettings): Promise<{ document: PandocDocument; report: Omit<ConversionResult, "body"> }> {
+export async function transformDocument(doc: PandocDocument, format: OutputFormat, settings: PluginSettings, imageResolver?: ImageResolver): Promise<{ document: PandocDocument; report: Omit<ConversionResult, "body"> }> {
   validateSettings(settings);
+  const filtered = excludeSections(doc.blocks, settings.excludedSections);
+  doc = { ...doc, blocks: filtered.blocks };
   assertSupported(doc);
   const targets = new Set<string>();
   const forced = new Set(settings.forcedCitations);
@@ -165,23 +199,23 @@ export async function transformDocument(doc: PandocDocument, format: OutputForma
     }
   });
   const patternMatches = await matchCitationPattern(settings.citationPattern, [...targets]);
-  const report: Report = { citations: new Set(), removedLinks: new Set(), warnings: [], patternMatches };
+  const report: Report = { citations: new Set(), removedLinks: new Set(), warnings: [], patternMatches, images: new Set(), excludedSections: filtered.excluded, imageResolver };
   return {
     document: { ...doc, meta: {}, blocks: transformBlocks(doc.blocks, format, settings, report, true) },
-    report: { citations: [...report.citations], removedLinks: [...report.removedLinks], warnings: report.warnings },
+    report: { citations: [...report.citations], removedLinks: [...report.removedLinks], warnings: report.warnings, images: [...report.images], excludedSections: report.excludedSections },
   };
 }
 
-export async function convertMarkdown(markdown: string, format: OutputFormat, settings: PluginSettings, runner: PandocRunner): Promise<ConversionResult> {
+export async function convertMarkdown(markdown: string, format: OutputFormat, settings: PluginSettings, runner: PandocRunner, imageResolver?: ImageResolver): Promise<ConversionResult> {
   validateSettings(settings);
   if (!markdown.trim()) throw new Error("There is no Markdown text to convert.");
   const parsed = await runner.run([
     "--from=markdown+wikilinks_title_after_pipe+lists_without_preceding_blankline-smart-citations-auto_identifiers-raw_tex-raw_html",
     "--to=json", "--tab-stop=4",
-  ], markdown);
+  ], normalizeExcludedHeadings(markdown, settings.excludedSections));
   const doc = JSON.parse(parsed) as PandocDocument;
   if (!Array.isArray(doc.blocks) || !Array.isArray(doc["pandoc-api-version"])) throw new Error("Pandoc returned an invalid document.");
-  const { document, report } = await transformDocument(doc, format, settings);
+  const { document, report } = await transformDocument(doc, format, settings, imageResolver);
   const body = await runner.run(["--from=json", `--to=${format}`, "--wrap=preserve"], JSON.stringify(document));
   return { body, ...report };
 }

@@ -1,7 +1,10 @@
-# Outline to TeX & Typst 0.1.1
+# Outline to TeX & Typst 0.1.2
 
-Fix citation matching in Obsidian desktop: use Chromium Web Workers instead of unsupported Node worker_threads in the Electron renderer. Custom patterns still time out after one second without blocking the interface.
+- Export hypothesis/theorem callouts as LaTeX environments or framed boxes; Typst uses framed blocks.
+- Export standalone Markdown and Obsidian images as figures with captions and Vault-relative paths.
+- Exclude メモ and todo sections, including subsections. Customize exact heading titles in settings.
+- Fix citation matching in the Obsidian renderer using Chromium Web Workers.
 
-Install or update through BRAT, or download `outline-to-tex-typst-0.1.1.zip` and replace `main.js`, `manifest.json`, and `styles.css` in your plugin folder. Keep your existing `data.json` to preserve settings.
+Update through BRAT after this release is published, or replace the three plugin files from `outline-to-tex-typst-0.1.2.zip`. Keep `data.json` to preserve settings. Custom LaTeX templates need graphicx and the hypothesis/theorem definitions described in README; the unchanged starter upgrades automatically.
 
-Pandoc 3.4+ is required. This plugin is not yet listed in the official Community Plugins directory.
+Pandoc 3.4+ is required. Images remain in the Vault and must be available to the compiler. The plugin is not yet listed in the official Community Plugins directory.

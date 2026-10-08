@@ -1,6 +1,7 @@
 import {
   App, ButtonComponent, MarkdownView, Modal, Notice, Plugin, PluginSettingTab, Setting,
 } from "obsidian";
+import { posix } from "node:path";
 import { convertMarkdown, type ConversionResult } from "./converter";
 import { saveExport } from "./export";
 import { findPandoc } from "./pandoc";
@@ -27,7 +28,7 @@ export default class OutlineExportPlugin extends Plugin {
         if (!checking) {
           void (async () => {
             const text = view?.editor ? view.editor.getValue() : await this.app.vault.read(file);
-            new ExportPreview(this.app, this, text, file.name).open();
+            new ExportPreview(this.app, this, text, file.name, file.path).open();
           })().catch(error => new Notice(errorMessage(error), 10_000));
         }
         return true;
@@ -38,7 +39,7 @@ export default class OutlineExportPlugin extends Plugin {
       editorCallback: (editor, view) => {
         const text = editor.getSelection();
         if (!text.trim()) { new Notice("Select a label and its complete outline first."); return; }
-        new ExportPreview(this.app, this, text, view.file?.name ?? "Untitled.md").open();
+        new ExportPreview(this.app, this, text, view.file?.name ?? "Untitled.md", view.file?.path ?? "Untitled.md").open();
       },
     });
   }
@@ -69,7 +70,7 @@ class ExportPreview extends Modal {
   private saveButton!: ButtonComponent;
   private outputFolder = "exports";
 
-  constructor(app: App, private plugin: OutlineExportPlugin, private markdown: string, private filename: string) {
+  constructor(app: App, private plugin: OutlineExportPlugin, private markdown: string, private filename: string, private sourcePath: string) {
     super(app);
   }
 
@@ -120,7 +121,11 @@ class ExportPreview extends Modal {
       const template = format === "latex" ? settings.latexTemplate : settings.typstTemplate;
       if (fullDocument) applyTemplate(template, "", metadataFor(this.filename, settings), format);
       const runner = await findPandoc(settings.pandocPath);
-      const result = await convertMarkdown(this.markdown, format, settings, runner);
+      const result = await convertMarkdown(this.markdown, format, settings, runner, target => {
+        const file = this.app.metadataCache.getFirstLinkpathDest(target, this.sourcePath);
+        if (!file) throw new Error(`Image not found in Vault: ${target}`);
+        return posix.relative(settings.outputFolder, file.path);
+      });
       if (sequence !== this.sequence) return;
       this.output = fullDocument ? applyTemplate(template, result.body, metadataFor(this.filename, settings), format) : result.body;
       this.outputFolder = settings.outputFolder;
@@ -137,9 +142,9 @@ class ExportPreview extends Modal {
 
   private showReport(result: ConversionResult): void {
     const details = this.report.createEl("details");
-    details.open = result.removedLinks.length > 0 || result.warnings.length > 0;
-    details.createEl("summary", { text: `${result.citations.length} citation keys · ${result.removedLinks.length} removed links · ${result.warnings.length} notices` });
-    for (const [label, entries] of [["Citation keys", result.citations], ["Removed links (including display text)", result.removedLinks], ["Notices", result.warnings]] as const) {
+    details.open = result.removedLinks.length > 0 || result.warnings.length > 0 || result.images.length > 0 || result.excludedSections.length > 0;
+    details.createEl("summary", { text: `${result.citations.length} citation keys · ${result.images.length} figures · ${result.excludedSections.length} excluded sections · ${result.removedLinks.length} removed links · ${result.warnings.length} notices` });
+    for (const [label, entries] of [["Citation keys", result.citations], ["Figure paths (relative to export folder; keep the image files available when compiling)", result.images], ["Excluded sections (including their subsections)", result.excludedSections], ["Removed links (including display text)", result.removedLinks], ["Notices", result.warnings]] as const) {
       if (!entries.length) continue;
       details.createEl("h4", { text: label });
       const list = details.createEl("ul");
@@ -188,20 +193,20 @@ class OutlineSettingsTab extends PluginSettingTab {
       .setValue(this.plugin.settings[key]).onChange(value => { this.plugin.settings[key] = value; this.save(); }));
   }
 
-  private choice(key: "titleMode" | "authorMode" | "dateMode" | "latexCitation" | "typstCitation", name: string, options: Record<string, string>): void {
+  private choice(key: "titleMode" | "authorMode" | "dateMode" | "latexCitation" | "typstCitation" | "latexCalloutStyle", name: string, options: Record<string, string>): void {
     new Setting(this.containerEl).setName(name).addDropdown(dropdown => dropdown.addOptions(options)
       .setValue(this.plugin.settings[key]).onChange(value => {
         Object.assign(this.plugin.settings, { [key]: value }); this.save();
       }));
   }
 
-  private multiline(key: "forcedCitations" | "excludedLinks" | "latexTemplate" | "typstTemplate", name: string, description: string): void {
+  private multiline(key: "forcedCitations" | "excludedLinks" | "excludedSections" | "latexTemplate" | "typstTemplate", name: string, description: string): void {
     const setting = new Setting(this.containerEl).setName(name).setDesc(description);
     setting.settingEl.addClass("outline-export-multiline");
     setting.addTextArea(area => {
       const value = this.plugin.settings[key];
       area.setValue(Array.isArray(value) ? value.join("\n") : value).onChange(text => {
-        if (key === "forcedCitations" || key === "excludedLinks") this.plugin.settings[key] = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+        if (key === "forcedCitations" || key === "excludedLinks" || key === "excludedSections") this.plugin.settings[key] = text.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
         else this.plugin.settings[key] = text;
         this.save();
       });
@@ -227,6 +232,8 @@ class OutlineSettingsTab extends PluginSettingTab {
     this.multiline("forcedCitations", "Always cite these targets", "One exact wikilink target per line. Use for keys outside the pattern.");
     this.multiline("excludedLinks", "Never cite these targets", "One exact target per line. These links and their display text are removed. Overrides Always cite.");
     this.heading("Document templates");
+    this.choice("latexCalloutStyle", "LaTeX callout style", { theorem: "Hypothesis / theorem environments", box: "Framed boxes" });
+    this.multiline("excludedSections", "Exclude these sections", "One exact heading title per line, case-insensitive. Excludes the heading and its subsections until the next heading of the same or higher level. Defaults: メモ and todo.");
     this.containerEl.createEl("p", { text: "Use exactly one {{body}}. Optional fields: {{title}}, {{author}}, {{date}}. Fields are escaped text; Typst text fields belong in content, outside quoted strings. Relative bibliography and import paths are resolved from the exported document." });
     this.multiline("latexTemplate", "LaTeX template", "The starter uses natbib. Change the packages and bibliography settings if you use biblatex. Configure a Japanese-capable document class/fonts for Japanese text.");
     this.multiline("typstTemplate", "Typst template", "Paste your page, font, import, show and bibliography settings around {{body}}.");
