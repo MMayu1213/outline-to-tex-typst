@@ -129,7 +129,7 @@ Place or configure `references.bib` yourself. Relative bibliography and import p
 - Obsidian-specific comment syntax `%%...%%` and plugin-generated views are not interpreted. Review notes containing them before export.
 - Custom LaTeX math macros may not translate to Typst; Pandoc warnings stop conversion. Math and target-language features depend on the receiving manuscript's configuration.
 - LaTeX math commands and document templates are preserved as source code. Conversion does not execute them or make them safe to compile. Compile documents from trusted sources, or use an isolated compilation environment for documents supplied by others.
-- Custom citation patterns run in a separate worker with a one-second deadline. A pattern that takes too long stops conversion with an error while the interface remains responsive. Patterns and individual link targets are limited to 4,096 characters; at most 50,000 distinct targets are matched per conversion.
+- Custom citation patterns run in a Chromium Web Worker in Obsidian, with a one-second deadline. A pattern that takes too long stops conversion with an error while the interface remains responsive. Patterns and individual link targets are limited to 4,096 characters; at most 50,000 distinct targets are matched per conversion. CLI tests use Node workers; the Electron renderer does not use Node worker_threads.
 - Partial selections are parsed independently: select the complete label and its descendants to avoid treating a child as a label.
 - Invalid patterns, output paths, templates, unsupported content, execution failures and Pandoc warnings are shown in the preview. Copy/save remain disabled until conversion succeeds.
 

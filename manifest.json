@@ -1,7 +1,7 @@
 {
   "id": "outline-to-tex-typst",
   "name": "Outline to TeX & Typst",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "minAppVersion": "1.5.0",
   "description": "Convert academic Markdown outlines and citation links into LaTeX or Typst source.",
   "author": "MMayu1213",
