@@ -101,6 +101,34 @@ It recognizes keys such as `Example2024-aa` and `Example2024-aa`. Configure your
 
 The destination manuscript needs the matching bibliography setup: natbib for `\citep`, biblatex for `\parencite`, or Typst's `#bibliography(...)`. A prose citation puts the author in the sentence; it does not edit your surrounding words.
 
+## Callouts, figures and excluded sections
+
+```markdown
+> [!hypothesis] Participation
+> Giving everyone equal time encourages participation.
+
+> [!theorem] Example statement
+> A fictional theorem for demonstrating the format.
+
+![A descriptive caption](plot.png)
+
+## todo
+This section is excluded.
+
+## Results
+This section is included.
+```
+
+`[!hypothesis]`, `[!h]`, `[!H: Example]` and `[!仮説]` become `hypothesis` environments in LaTeX; `[!theorem]` and `[!定理]` become `theorem` environments. Other callout types become framed boxes. Choose **LaTeX callout style → Framed boxes** to use boxes for every callout. Typst always uses a framed block. Fold markers (`+` / `-`) do not affect export. The callout title and body are retained, and citations in the body are converted.
+
+The starter LaTeX preamble includes `amsthm`, `graphicx`, `\newtheorem{hypothesis}{Hypothesis}` and `\newtheorem{theorem}{Theorem}`. An unchanged old starter template upgrades automatically; personal templates are retained. Add the corresponding definitions to your own preamble when using theorem mode or body-only output. LaTeX boxes use a minipage and do not split across pages.
+
+Standalone `![caption](plot.png)` and `![[plot.png]]` become LaTeX `figure` / Typst `#figure(...)`. Markdown alt text and nonnumeric wikilink aliases become captions; `![[plot.png|400]]` treats 400 as a display size, not a caption. Exports currently fit images to the text width rather than preserving Obsidian pixel sizes. PNG, JPG and PDF work in both formats; SVG is supported for Typst only. Remote image URLs and unsafe filenames cause an error; images are never downloaded.
+
+In Obsidian, image files are resolved from the original note and referenced relative to the configured export folder. Images are not moved or copied. Keep that folder layout when compiling, or adjust image paths if you copy the source to another project. Preview lists the figure paths. For body-only output pasted into another manuscript, adjust paths relative to that manuscript.
+
+**Exclude these sections** defaults to `メモ` and `todo`. It matches exact heading titles, case-insensitively, and removes each matching heading and its descendants until the next heading of the same or higher level. Both `# メモ` / `# todo` and the compact forms `#メモ` / `#todo` are accepted. Heading-like text inside code is retained. Exclusions happen before image/embed validation or citation matching, and the preview lists the omitted sections. A selection is parsed independently, so select its exclusion heading too if you want that section omitted.
+
 ## Document settings and templates
 
 All settings are edited through the **Obsidian settings GUI** and saved through the standard API to the plugin's `data.json`. No manual JSON editing is needed. Settings are local to the Vault's plugin installation; personal `data.json` is not part of this repository.
@@ -119,13 +147,13 @@ For Typst, insert text placeholders in **markup/content**, for example `[{{title
 
 The starter LaTeX template uses `article` and natbib. Change the class, fonts and packages to match your paper, especially for Japanese text. If you choose `parencite`, replace the natbib/bibliography setup with your own biblatex setup. The Typst starter includes page/text/heading settings and a bibliography call; replace these with your usual `#import` / `#show` rules if desired.
 
-Place or configure `references.bib` yourself. Relative bibliography and import paths are resolved **from the exported document**, not from the note or plugin. The plugin does not copy supporting files. Source-only export adds no preamble, title or bibliography.
+Place or configure `references.bib` yourself. Relative bibliography and import paths are resolved **from the exported document**, not from the note or plugin. The plugin does not copy supporting files; image references use paths relative to the configured export folder. Source-only export adds no preamble, title or bibliography.
 
 ## Limits and error handling
 
 - Desktop only; local Pandoc 3.4+ is required. No AI service, network conversion, compiler or font downloads occur at runtime.
-- Images, Obsidian note embeds and callouts stop conversion with a description of the unsupported content. Tables, definition lists, raw blocks and other unsupported block structures also produce explicit errors rather than silently dropping content.
-- Put structured blocks such as fenced code, display-math paragraphs or block quotes outside flattened outlines when their block structure needs to survive. Inline code and inline math are supported inside outline text.
+- Obsidian note embeds stop conversion. Standalone images and callouts are supported as described above; inline images must be moved onto their own line. Tables, definition lists, raw blocks and other unsupported block structures also produce explicit errors rather than silently dropping content.
+- Put fenced code, display-math paragraphs and ordinary block quotes outside flattened outlines when their block structure needs to survive. Figures and callouts inside outlines are kept as separate blocks, with surrounding paragraphs split in their original order. Inline code and inline math are supported inside outline text.
 - Obsidian-specific comment syntax `%%...%%` and plugin-generated views are not interpreted. Review notes containing them before export.
 - Custom LaTeX math macros may not translate to Typst; Pandoc warnings stop conversion. Math and target-language features depend on the receiving manuscript's configuration.
 - LaTeX math commands and document templates are preserved as source code. Conversion does not execute them or make them safe to compile. Compile documents from trusted sources, or use an isolated compilation environment for documents supplied by others.

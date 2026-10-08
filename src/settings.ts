@@ -18,6 +18,8 @@ export interface PluginSettings {
   citationPattern: string;
   forcedCitations: string[];
   excludedLinks: string[];
+  excludedSections: string[];
+  latexCalloutStyle: "theorem" | "box";
   latexTemplate: string;
   typstTemplate: string;
   pandocPath: string;
@@ -30,6 +32,9 @@ export const LATEX_TEMPLATE = String.raw`\documentclass{article}
 \usepackage{hyperref}
 \usepackage{amsmath,amssymb}
 \usepackage{graphicx}
+\usepackage{amsthm}
+\newtheorem{hypothesis}{Hypothesis}
+\newtheorem{theorem}{Theorem}
 
 \title{ {{title}} }
 \author{ {{author}} }
@@ -77,6 +82,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   citationPattern: "^[A-Za-z][A-Za-z0-9_]*[12][0-9]{3}-[A-Za-z]{2}$",
   forcedCitations: [],
   excludedLinks: [],
+  excludedSections: ["メモ", "todo"],
+  latexCalloutStyle: "theorem",
   latexTemplate: LATEX_TEMPLATE,
   typstTemplate: TYPST_TEMPLATE,
   pandocPath: "",
@@ -85,22 +92,26 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 
 export function loadSettings(data: unknown): PluginSettings {
   const input = data && typeof data === "object" ? data as Record<string, unknown> : {};
-  const settings: PluginSettings = { ...DEFAULT_SETTINGS, forcedCitations: [], excludedLinks: [] };
+  const settings: PluginSettings = { ...DEFAULT_SETTINGS, forcedCitations: [], excludedLinks: [], excludedSections: [...DEFAULT_SETTINGS.excludedSections] };
   const strings = ["titleValue", "authorValue", "dateValue", "citationPattern", "latexTemplate", "typstTemplate", "pandocPath", "outputFolder"] as const;
   for (const key of strings) if (typeof input[key] === "string") settings[key] = input[key];
   const enums = {
     titleMode: ["filename", "fixed", "omit"], authorMode: ["fixed", "omit"],
     dateMode: ["today", "fixed", "omit"], latexCitation: ["citep", "cite", "parencite"],
     typstCitation: ["prose", "normal"],
+    latexCalloutStyle: ["theorem", "box"],
   } as const;
   for (const [key, values] of Object.entries(enums)) {
     if (typeof input[key] === "string" && (values as readonly string[]).includes(input[key])) {
       Object.assign(settings, { [key]: input[key] });
     }
   }
-  for (const key of ["forcedCitations", "excludedLinks"] as const) {
+  for (const key of ["forcedCitations", "excludedLinks", "excludedSections"] as const) {
     if (Array.isArray(input[key])) settings[key] = input[key].filter((item): item is string => typeof item === "string");
   }
+  // Upgrade only the unmodified starter; keep personal templates intact.
+  const oldStarter = LATEX_TEMPLATE.replace("\\usepackage{amsthm}\n\\newtheorem{hypothesis}{Hypothesis}\n\\newtheorem{theorem}{Theorem}\n", "");
+  if (settings.latexTemplate === oldStarter) settings.latexTemplate = LATEX_TEMPLATE;
   return settings;
 }
 

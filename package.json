@@ -1,6 +1,6 @@
 {
   "name": "outline-to-tex-typst",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Export academic outlines from Obsidian to LaTeX and Typst.",
   "license": "MIT",

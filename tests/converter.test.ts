@@ -61,9 +61,9 @@ test("emphasis citations are transformed and code literals are left alone", asyn
   assert.deepEqual(result.removedLinks, []);
 });
 
-test("images, embeds and callouts are rejected before writing", async () => {
+test("note embeds are rejected before writing", async () => {
   const pandoc = await runner();
-  for (const source of ["![[Other note]]", "Before ![[Other note]] after", "![Caption](image.png)", "> [!note]\n> Content"]) {
+  for (const source of ["![[Other note]]", "Before ![[Other note]] after"]) {
     await assert.rejects(convertMarkdown(source, "latex", settings(), pandoc), /Unsupported content/);
   }
 });
