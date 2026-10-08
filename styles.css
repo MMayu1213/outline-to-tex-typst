@@ -1,0 +1,22 @@
+.outline-export-modal { width: min(1000px, 94vw); }
+.outline-export-source {
+  width: 100%;
+  min-height: 340px;
+  height: 45vh;
+  resize: vertical;
+  font-family: var(--font-monospace);
+  font-size: var(--font-smaller);
+  line-height: 1.5;
+  white-space: pre;
+}
+.outline-export-status { margin: 0.75em 0; white-space: pre-wrap; }
+.outline-export-error { color: var(--text-error); }
+.outline-export-report { margin-bottom: 1em; }
+.outline-export-report li { overflow-wrap: anywhere; }
+.outline-export-multiline { display: block; }
+.outline-export-multiline .setting-item-control { margin-top: 0.75em; }
+.outline-export-multiline textarea {
+  width: 100%;
+  font-family: var(--font-monospace);
+  resize: vertical;
+}

@@ -1,0 +1,11 @@
+node_modules/
+main.js
+*.map
+data.json
+.DS_Store
+coverage/
+dist/
+.validation/
+.test-vault/
+*.pdf
+.obsidian/
